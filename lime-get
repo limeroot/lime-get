@@ -1,0 +1,112 @@
+#!/bin/sh
+
+
+limehost="ftp://repo.limeroot.org"
+listpath="/var/lib/apt/lists"
+listfile="www.limeroot.org-repo_dist_"
+packpath="/var/cache/apt/archives"
+
+#Repo_structure:
+# Package: lr-utils
+# Version: 1.0
+# Architecture: i386
+# Maintainer: LimeRoot Team <devel@limeroot.org>
+# Description: Extra utilities for LimeRoot systems.
+
+
+get_arch(){
+	lrsys=$(uname -m)
+	case "$lrsys" in
+		i386|i686|i586) arch="i386";;
+		x86_64) arch="x86_64"
+	esac
+}
+
+get_path(){
+	#$1 -> file type: ( package | list )
+	#$2 -> repository ( devel | stable | nonfree )
+	get_arch
+	case "$1" in
+		package)
+			echo "$packpath/"	
+		;;
+		list)
+			echo "$listpath/www.limeroot.org-repot_dist_$2_binary-${arch}_Packages"
+			#example output: /var/lib/apt/list/www.limeroot.org-repot_dist_stable_binary-i686_Packages
+		;;
+	esac
+}
+
+fnsearchpkg(){
+	#$1 -> package name
+	infile="$(grep -iw "$1\$" $(get_path "list" "*") -l)"
+	repository=$(echo $infile | awk -F "_" '{ print $3}')
+	auxname=$(grep -iw "$1\$" "$infile")
+	name=${auxname##* }
+	auxversion=$(grep -iwA 4 "$1\$" "$infile" | grep "Version")
+	version=${auxversion##* }
+	packname="${name}_${version}_${arch}.deb"
+	packurl="$limehost/$arch/$repository/$packname"
+	#example output: ftp://repo.limeroot.org/x86_64/stable/lr-utils_1.0_i386.deb
+}
+
+fndownload(){
+	#$1 -> file type: ( package | list )
+	#$2 -> repository: ( devel | stable | nonfree ) || Package Name if $1 is a package
+	get_arch
+	case "$1" in
+		package)
+			fnsearchpkg "$2"
+			echo "Trying to get $packname..."
+			wget $packurl -O $packpath/$packname > /dev/null 2>&1
+			#example output: ftp://repo.limeroot.org/x86_64/stable_packages
+			if [ "$?" -eq 0 ]; then
+				echo "Preparing to install..."
+				fninstall
+			else
+				echo "trying with apt-get, because package $2 not in limeroot repository..."
+			fi
+		;;	
+		list)
+			echo "Updating $2 repository for LimeRoot $arch ..."
+			wget $limehost/$arch/$2_packages -O $(get_path "list" "$2") > /dev/null 2>&1
+			#example output: wget ftp://repo.limeroot.org/x86_64/stable/lr-utils_1.0_i386.deb
+			[ "$?" -eq 0 ] && echo "Ready." || echo "Updating fail, impossible to get list file from Internet"
+		;;
+	esac
+}
+
+fninstall(){
+	dpkg -i $packpath/$packname
+}
+
+fnupdate(){
+	[ -f "/etc/limeroot/lime-get.conf" ] && { . /etc/limeroot/lime-get.conf; } || { devel='off'; stable='on'; nonfree='off'; }
+	#lime-get structure:
+	# devel='off'
+	# stable='on'
+	# nonfree='off'
+	[ "$devel" = "on" ] && fndownload "list" "devel"
+	[ "$stable" = "on" ] && fndownload "list" "stable"
+	[ "$nonfree" = "on" ] && fndownload "list" "nonfree"
+}
+
+case "$1" in
+	update)
+		if [ "$2" = "lime" ]; then
+			fnupdate
+		else
+			fnupdate
+			apt-get update
+		fi
+	;;
+	install)
+		fndownload "package" "$2"
+		apt-get install "$2"
+		[ "$?" -ne 0 ] && echo "Package not found"
+	;;
+	remove)
+		apt-get purge $2
+	;;
+	*) echo "Usage: $0 { update | install | remove } [OPTIONS]"
+esac
