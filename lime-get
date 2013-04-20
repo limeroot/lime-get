@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/dash
 
 
 limehost="ftp://repo.limeroot.org"
@@ -39,7 +39,9 @@ get_path(){
 
 fnsearchpkg(){
 	#$1 -> package name
+	[ ! -f "$(get_path "list" "stable")" ] && { echo -e "\e[1;31mPlease first use $0 update OR $0 update lime\e[00m"; exit 1; }
 	infile="$(grep -iw "$1\$" $(get_path "list" "*") -l)"
+	[ "$?" -ne 0 ] && fnaptget "$1"
 	repository=$(echo $infile | awk -F "_" '{ print $3}')
 	auxname=$(grep -iw "$1\$" "$infile")
 	name=${auxname##* }
@@ -57,27 +59,29 @@ fndownload(){
 	case "$1" in
 		package)
 			fnsearchpkg "$2"
-			echo "Trying to get $packname..."
+			echo -e "\e[1;34mTrying to get $packname...\e[00m"
 			wget $packurl -O $packpath/$packname > /dev/null 2>&1
 			#example output: ftp://repo.limeroot.org/x86_64/stable_packages
-			if [ "$?" -eq 0 ]; then
-				echo "Preparing to install..."
-				fninstall
-			else
-				echo "trying with apt-get, because package $2 not in limeroot repository..."
-			fi
+			[ "$?" -eq 0 ] && { echo -e "\e[1;34mPreparing to install...\e[00m"; fninstall; } || echo -e "\e[1;31mImpossible to get file from Repository\e[00m"
 		;;	
 		list)
-			echo "Updating $2 repository for LimeRoot $arch ..."
+			echo -e "\e[1;34mUpdating $2 repository for LimeRoot $arch ...\e[00m"
 			wget $limehost/$arch/$2_packages -O $(get_path "list" "$2") > /dev/null 2>&1
 			#example output: wget ftp://repo.limeroot.org/x86_64/stable/lr-utils_1.0_i386.deb
-			[ "$?" -eq 0 ] && echo "Ready." || echo "Updating fail, impossible to get list file from Internet"
+			[ "$?" -eq 0 ] && echo -e "\e[1;34mReady\e[00m" || echo -e "\e[1;31mUpdating fail, impossible to get list file from Internet\e[00m"
 		;;
 	esac
 }
 
 fninstall(){
 	dpkg -i $packpath/$packname
+	[ "$?" -ne 0 ] && exit 1
+}
+
+fnaptget(){
+	echo -e "\e[1;30mtrying with apt-get, because package $2 not in limeroot repository...\e[00m"
+	apt-get install "$1"
+	exit
 }
 
 fnupdate(){
@@ -102,8 +106,6 @@ case "$1" in
 	;;
 	install)
 		fndownload "package" "$2"
-		apt-get install "$2"
-		[ "$?" -ne 0 ] && echo "Package not found"
 	;;
 	remove)
 		apt-get purge $2
